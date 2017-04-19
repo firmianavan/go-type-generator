@@ -1,5 +1,5 @@
 # go-type-generator
-从数据库表生成对应的go类型以及相应的maper(generate go types and mappers from tables of database)
+从数据库表生成对应的go类型以及相应的maper以及一些常用的数据库操作,作为ORM外的另一个选择, 目前仅支持mysql.(generate go types and mappers and some common db operations from tables of database, currentlt on mysql is supported)
 
 ### install
 go install github.com/firmianavan/go-type-generator
