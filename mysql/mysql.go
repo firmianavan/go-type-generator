@@ -62,13 +62,38 @@ func MapRow(row *sql.Rows, mapper RowMaper) error {
     return row.Scan(params...)
 }
 
-func InsertAndGetId(db *sql.DB, mapper RowMaper, idCol string) (id int64, e error) {
+//insert, return an error if exists. if you want to abandon some columns, add their name into "ommit" param
+func Insert(db *sql.DB, mapper RowMaper, ommit ...string) error {
     table, m := mapper.RowMap()
     sql1 := "INSERT " + table + "("
     sql2 := ") values("
     var params []interface{}
     for k, v := range m {
-        if k != idCol {
+        if !contains(k, ommit) {
+            sql1 += k + ", "
+            sql2 += "?, "
+            params = append(params, v)
+        }
+    }
+    sql1 = sql1[:len(sql1)-2]
+    sql2 = sql2[:len(sql2)-2]
+    sql := sql1 + sql2 + ")"
+    stmt, err := db.Prepare(sql)
+    if err != nil {
+        return err
+    }
+    _, err := stmt.Exec(params...)
+    return err
+}
+
+//insert, return generated id by db and an error if exists. if you want to abandon some columns, add their name into "ommit" param
+func InsertAndGetId(db *sql.DB, mapper RowMaper, idCol string, ommit ...string) (id int64, e error) {
+    table, m := mapper.RowMap()
+    sql1 := "INSERT " + table + "("
+    sql2 := ") values("
+    var params []interface{}
+    for k, v := range m {
+        if k != idCol && !contains(k, ommit) {
             sql1 += k + ", "
             sql2 += "?, "
             params = append(params, v)
@@ -88,12 +113,14 @@ func InsertAndGetId(db *sql.DB, mapper RowMaper, idCol string) (id int64, e erro
     return res.LastInsertId()
 }
 
-func UpdateById(db *sql.DB, mapper RowMaper, idCol string) (rowsAffected int64, e error) {
+
+//update ** where idCol=?, return rows affected and an error if exists. if you want to abandon some columns, add their name into "ommit" param
+func UpdateById(db *sql.DB, mapper RowMaper, idCol string, ommit ...string) (rowsAffected int64, e error) {
     table, m := mapper.RowMap()
     sql := "UPDATE " + table + " set "
     var params []interface{}
     for k, v := range m {
-        if k != idCol {
+        if k != idCol && !contains(k, ommit) {
             sql += (k + " = ?, ")
             params = append(params, v)
         }
@@ -113,6 +140,17 @@ func UpdateById(db *sql.DB, mapper RowMaper, idCol string) (rowsAffected int64, 
     }
     return res.RowsAffected()
 }
+
+func contains(target string, sets ...string) bool {
+    for s := range sets {
+        if target == s {
+            return true
+        }
+    }
+    return false
+}
+
+//select where key=v, if return more than one row, only the first mapped into param mapper
 func QueryUnique(db *sql.DB, mapper RowMaper, key string, v interface{}) error {
     table, _ := mapper.RowMap()
     rows, err := db.Query("select * from "+table+" where  "+key+" =?", v)
@@ -126,6 +164,8 @@ func QueryUnique(db *sql.DB, mapper RowMaper, key string, v interface{}) error {
     }
 
 }
+
+//delete ** where key=v, return rows affected and an error if exists. 
 func DeleteById(db *sql.DB, table string, key string, v interface{}) (affectedRows int64, e error) {
     ret, err := db.Exec("delete from "+table+" where "+key+"=?", v)
     if err != nil {
