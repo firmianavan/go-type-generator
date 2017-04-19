@@ -5,7 +5,7 @@
 go install github.com/firmianavan/go-type-generator
 
 ### Usage
-this is a command-line tool, type --help you will see:
+this is a command-line tool,if env `GOPATH` is set and `$GOPATH/bin` is add to path, type `$ go-type-generator --help` you will see:
 ```
     -c string
         connect str, should be matched with driver, a mysql conn str:'user:pwd@tcp(127.0.0.1:3306)/db' (default "van:123456@tcp(127.0.0.1:3306)/wmp")
