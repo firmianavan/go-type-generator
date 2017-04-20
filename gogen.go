@@ -70,11 +70,16 @@ func main() {
 	}
 	defer f1.Close()
 	fmt.Fprintln(f1, "package entity")
+	fmt.Fprintln(f1, "import (\n    \"database/sql\"")
 	if strings.Contains(code, "time.Time") {
-		fmt.Fprintln(f1, "import (\n    \"time\"\n)\n")
+		fmt.Fprintln(f1, "    \"time\"")
 	}
+	fmt.Fprintln(f1, ")")
 	fmt.Fprintln(f1, mysql.InterfaceDefination)
-	formated, _ := format.Source([]byte(code))
+	formated, err := format.Source([]byte(code))
+	if err != nil {
+		log.Fatal(err)
+	}
 	fmt.Fprintln(f1, string(formated))
 
 	if *withMethod {

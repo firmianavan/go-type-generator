@@ -218,12 +218,15 @@ func genText(tableName string, cols []MetaCol) string {
 	//buffer.WriteString("package entity\n\n")
 	camel := common.ChangeNameToCamel(tableName, "_")
 	buffer.WriteString("type " + camel + " struct {")
+	constVar := ""
 	for i, _ := range cols {
-		cols[i].GoType = mapFromSqlType(cols[i].Type)
+		cols[i].GoType = mapFromSqlType(cols[i].Type, cols[i].Null)
 		cols[i].GoField = common.ChangeNameToCamel(cols[i].Field, "_")
+		constVar += ifEnum(cols[i].Type, camel, cols[i].GoField)
 		buffer.WriteString(cols[i].String())
 	}
 	buffer.WriteString("\n}\n")
+	buffer.WriteString(constVar)
 	buffer.WriteString(fmt.Sprintf("func (%v *%v) RowMap()(tableName string, colMap map[string]interface{}) {\n", tableName, camel))
 	buffer.WriteString("    var colMap = map[string]interface{}{\n")
 	for i, v := range cols {
@@ -239,18 +242,41 @@ func genText(tableName string, cols []MetaCol) string {
 	return buffer.String()
 }
 
-func mapFromSqlType(sqlType string) string {
+func mapFromSqlType(sqlType string, nullAble string) string {
+	ifNull := func(currentType string) string {
+		if "yes" == strings.ToLower(nullAble) {
+			return "sql.Null" + strings.Title(currentType)
+		} else {
+			return currentType
+		}
+	}
 	if strings.Contains(sqlType, "int") {
-		return "int64"
+		return ifNull("int64")
 	} else if strings.Contains(sqlType, "char") || strings.Contains(sqlType, "text") {
-		return "string"
+		return ifNull("string")
 	} else if strings.Contains(sqlType, "date") || strings.Contains(sqlType, "timestamp") {
 		return "time.Time"
 	} else if strings.Contains(sqlType, "float") || strings.Contains(sqlType, "double") {
-		return "float64"
+		return ifNull("float64")
+	} else if strings.Contains(sqlType, "enum") {
+		return "string"
 	} else {
 		return "[]byte"
 	}
+}
+
+func ifEnum(sqlType, typeName, fieldName string) string {
+	ret := ""
+	if strings.Contains(sqlType, "enum") {
+		tmp := sqlType[strings.Index(sqlType, "('")+2 : strings.LastIndex(sqlType, "')")]
+		t := strings.Split(tmp, "','")
+		for i := 0; i < len(t); i++ {
+			des := strings.Replace(t[i], "-", "_", -1) //变量命名不可以有中划线, 会被认为是减号
+			ret += fmt.Sprintf("var Const_%s_%s_%s string = \"%s\"\n", typeName, fieldName, strings.Title(des), des)
+		}
+		//fmt.Println(ret)
+	}
+	return ret
 }
 
 func (v *MetaCol) String() string {
