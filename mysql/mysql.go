@@ -38,7 +38,22 @@ func Close() {
 var InterfaceDefination string = `
 type RowMaper interface {
     //返回表名和字段映射
-    RowMap() (string, map[string]interface{})
+    RowMap() (string, map[string]Column)
+}
+
+type ColumnMata struct {
+    Field   string         //数据库字段名
+    Type    string         //数据库的字段类型, 可以用来做长度验证
+    Null    string         //是否可为空"YES"or"NO"
+    Key     string         //"PRI","UNI"
+    Default string         //默认值
+    Extra   string         //
+    GoType  string         //go中对应字段使用的类型
+    GoField string         //go中对应字段名
+}
+type Column struct {
+    Meta *ColumnMata
+    V interface{}
 }
 `
 var ExportedMethods string = `
@@ -50,16 +65,32 @@ func MapRow(row *sql.Rows, mapper RowMaper) error {
         return err
     }
     var params []interface{}
+    tmpString := make(map[string]*sql.NullString) //用来存放数据库得到的NullString类型, 便于后面统一装换为string类型
     _, colMap := mapper.RowMap()
     for _, v := range sqlRows {
-        tmp := colMap[v]
-        if tmp == nil {
+        tmp, exists := colMap[v]
+        if !exists {
             var i interface{}
-            tmp = &i
+            params = append(params, &i) //舍弃
+        } else if tmp.Meta.GoType == "string" && tmp.Meta.Null == "YES" { //先scan到sql.NullString, 在转换到对象中的string
+            tmpNullString := sql.NullString{}
+            tmpString[v] = &tmpNullString
+            params = append(params, &tmpNullString)
+        } else {
+            params = append(params, tmp.V)
         }
-        params = append(params, tmp)
+
     }
-    return row.Scan(params...)
+    err = row.Scan(params...)
+    if err != nil {
+        return err
+    }
+    for k, v := range tmpString {
+        if strPtr, ok := (colMap[k].V).(*string); ok {
+            *strPtr = v.String
+        }
+    }
+    return err
 }
 
 //insert, return an error if exists. if you want to abandon some columns, add their name into "ommit" param
@@ -69,10 +100,10 @@ func Insert(db *sql.DB, mapper RowMaper, ommit ...string) error {
     sql2 := ") values("
     var params []interface{}
     for k, v := range m {
-        if !contains(k, ommit) {
+        if !contains(k, ommit...) {
             sql1 += k + ", "
             sql2 += "?, "
-            params = append(params, v)
+            params = append(params, v.V)
         }
     }
     sql1 = sql1[:len(sql1)-2]
@@ -82,7 +113,7 @@ func Insert(db *sql.DB, mapper RowMaper, ommit ...string) error {
     if err != nil {
         return err
     }
-    _, err := stmt.Exec(params...)
+    _, err = stmt.Exec(params...)
     return err
 }
 
@@ -93,10 +124,10 @@ func InsertAndGetId(db *sql.DB, mapper RowMaper, idCol string, ommit ...string) 
     sql2 := ") values("
     var params []interface{}
     for k, v := range m {
-        if k != idCol && !contains(k, ommit) {
+        if k != idCol && !contains(k, ommit...) {
             sql1 += k + ", "
             sql2 += "?, "
-            params = append(params, v)
+            params = append(params, v.V)
         }
     }
     sql1 = sql1[:len(sql1)-2]
@@ -113,22 +144,21 @@ func InsertAndGetId(db *sql.DB, mapper RowMaper, idCol string, ommit ...string) 
     return res.LastInsertId()
 }
 
-
 //update ** where idCol=?, return rows affected and an error if exists. if you want to abandon some columns, add their name into "ommit" param
 func UpdateById(db *sql.DB, mapper RowMaper, idCol string, ommit ...string) (rowsAffected int64, e error) {
     table, m := mapper.RowMap()
     sql := "UPDATE " + table + " set "
     var params []interface{}
     for k, v := range m {
-        if k != idCol && !contains(k, ommit) {
+        if k != idCol && !contains(k, ommit...) {
             sql += (k + " = ?, ")
-            params = append(params, v)
+            params = append(params, v.V)
         }
     }
     sql = sql[:len(sql)-2]
     if idCol != "" {
         sql += (" where " + idCol + " = ?")
-        params = append(params, m[idCol])
+        params = append(params, m[idCol].V)
     }
     stmt, err := db.Prepare(sql)
     if err != nil {
@@ -142,7 +172,7 @@ func UpdateById(db *sql.DB, mapper RowMaper, idCol string, ommit ...string) (row
 }
 
 func contains(target string, sets ...string) bool {
-    for s := range sets {
+    for _, s := range sets {
         if target == s {
             return true
         }
@@ -165,7 +195,7 @@ func QueryUnique(db *sql.DB, mapper RowMaper, key string, v interface{}) error {
 
 }
 
-//delete ** where key=v, return rows affected and an error if exists. 
+//delete ** where key=v, return rows affected and an error if exists.
 func DeleteById(db *sql.DB, table string, key string, v interface{}) (affectedRows int64, e error) {
     ret, err := db.Exec("delete from "+table+" where "+key+"=?", v)
     if err != nil {
@@ -174,6 +204,33 @@ func DeleteById(db *sql.DB, table string, key string, v interface{}) (affectedRo
         return ret.RowsAffected()
     }
 
+}
+
+`
+
+var DataSource string = `
+package service
+
+import (
+    "database/sql"
+    _ "github.com/go-sql-driver/mysql"
+    "log"
+    "sync"
+)
+
+var db *sql.DB
+var once sync.Once
+var connStr string = "%s?parseTime=true&loc=UTC"
+
+func GetDB() *sql.DB {
+    once.Do(func() {
+        var err error
+        db, err = sql.Open("mysql", connStr)
+        if err != nil {
+            log.Fatal("program exit: failed to connect the database %s", connStr)
+        }
+    })
+    return db
 }
 `
 
@@ -219,24 +276,28 @@ func genText(tableName string, cols []MetaCol) string {
 	camel := common.ChangeNameToCamel(tableName, "_")
 	buffer.WriteString("type " + camel + " struct {")
 	constVar := ""
+	metaSingleton := ""
 	for i, _ := range cols {
 		cols[i].GoType = mapFromSqlType(cols[i].Type, cols[i].Null)
 		cols[i].GoField = common.ChangeNameToCamel(cols[i].Field, "_")
 		constVar += ifEnum(cols[i].Type, camel, cols[i].GoField)
+		metaSingleton += fmt.Sprintf("var %s%s ColumnMata = ColumnMata{ Field:\"%s\",Type:\"%s\",Null:\"%s\",Key:\"%s\",Default:\"%s\",Extra:\"%s\",GoType:\"%s\",GoField:\"%s\"}\n",
+			tableName, cols[i].GoField, cols[i].Field, cols[i].Type, cols[i].Null, cols[i].Key, cols[i].Default.String, cols[i].Extra, cols[i].GoType, cols[i].GoField)
 		buffer.WriteString(cols[i].String())
 	}
 	buffer.WriteString("\n}\n")
 	buffer.WriteString(constVar)
-	buffer.WriteString(fmt.Sprintf("func (%v *%v) RowMap()(tableName string, colMap map[string]interface{}) {\n", tableName, camel))
-	buffer.WriteString("    var colMap = map[string]interface{}{\n")
+	buffer.WriteString(metaSingleton)
+	buffer.WriteString(fmt.Sprintf("func (%v *%v) RowMap()(tableName string, colMap map[string]Column) {\n", tableName, camel))
+	buffer.WriteString("    colMap = map[string]Column{\n")
 	for i, v := range cols {
 		if i != 0 {
 			buffer.WriteString(",\n")
 		}
-		buffer.WriteString(fmt.Sprintf("\"%s\": &%s.%s", v.Field, tableName, v.GoField))
+		buffer.WriteString(fmt.Sprintf("\"%s\": Column{Meta : &%s%s, V : &%s.%s}", v.Field, tableName, v.GoField, tableName, v.GoField))
 	}
 	buffer.WriteString("    }\n")
-	buffer.WriteString("    return " + tableName + ",colMap\n")
+	buffer.WriteString("    return \"" + tableName + "\",colMap\n")
 	buffer.WriteString("    }\n\n\n")
 
 	return buffer.String()
@@ -253,7 +314,7 @@ func mapFromSqlType(sqlType string, nullAble string) string {
 	if strings.Contains(sqlType, "int") {
 		return ifNull("int64")
 	} else if strings.Contains(sqlType, "char") || strings.Contains(sqlType, "text") {
-		return ifNull("string")
+		return "string"
 	} else if strings.Contains(sqlType, "date") || strings.Contains(sqlType, "timestamp") {
 		return "time.Time"
 	} else if strings.Contains(sqlType, "float") || strings.Contains(sqlType, "double") {
@@ -272,7 +333,7 @@ func ifEnum(sqlType, typeName, fieldName string) string {
 		t := strings.Split(tmp, "','")
 		for i := 0; i < len(t); i++ {
 			des := strings.Replace(t[i], "-", "_", -1) //变量命名不可以有中划线, 会被认为是减号
-			ret += fmt.Sprintf("var Const_%s_%s_%s string = \"%s\"\n", typeName, fieldName, strings.Title(des), des)
+			ret += fmt.Sprintf("const Const_%s_%s_%s string = \"%s\"\n", typeName, fieldName, strings.Title(des), des)
 		}
 		//fmt.Println(ret)
 	}
