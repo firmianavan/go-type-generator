@@ -94,7 +94,8 @@ func MapRow(row *sql.Rows, mapper RowMaper) error {
 }
 
 //insert, return an error if exists. if you want to abandon some columns, add their name into "ommit" param
-func Insert(db *sql.DB, mapper RowMaper, ommit ...string) error {
+func Insert( mapper RowMaper, ommit ...string) error {
+    db:=GetDB()
     table, m := mapper.RowMap()
     sql1 := "INSERT " + table + "("
     sql2 := ") values("
@@ -118,7 +119,8 @@ func Insert(db *sql.DB, mapper RowMaper, ommit ...string) error {
 }
 
 //insert, return generated id by db and an error if exists. if you want to abandon some columns, add their name into "ommit" param
-func InsertAndGetId(db *sql.DB, mapper RowMaper, idCol string, ommit ...string) (id int64, e error) {
+func InsertAndGetId(mapper RowMaper, idCol string, ommit ...string) (id int64, e error) {
+    db:=GetDB()
     table, m := mapper.RowMap()
     sql1 := "INSERT " + table + "("
     sql2 := ") values("
@@ -145,7 +147,8 @@ func InsertAndGetId(db *sql.DB, mapper RowMaper, idCol string, ommit ...string) 
 }
 
 //update ** where idCol=?, return rows affected and an error if exists. if you want to abandon some columns, add their name into "ommit" param
-func UpdateById(db *sql.DB, mapper RowMaper, idCol string, ommit ...string) (rowsAffected int64, e error) {
+func UpdateById( mapper RowMaper, idCol string, ommit ...string) (rowsAffected int64, e error) {
+    db:=GetDB()
     table, m := mapper.RowMap()
     sql := "UPDATE " + table + " set "
     var params []interface{}
@@ -181,7 +184,8 @@ func contains(target string, sets ...string) bool {
 }
 
 //select where key=v, if return more than one row, only the first mapped into param mapper
-func QueryUnique(db *sql.DB, mapper RowMaper, key string, v interface{}) error {
+func QueryUnique( mapper RowMaper, key string, v interface{}) error {
+    db:=GetDB()
     table, _ := mapper.RowMap()
     rows, err := db.Query("select * from "+table+" where  "+key+" =?", v)
     if err != nil {
@@ -196,7 +200,8 @@ func QueryUnique(db *sql.DB, mapper RowMaper, key string, v interface{}) error {
 }
 
 //delete ** where key=v, return rows affected and an error if exists.
-func DeleteById(db *sql.DB, table string, key string, v interface{}) (affectedRows int64, e error) {
+func DeleteById( table string, key string, v interface{}) (affectedRows int64, e error) {
+    db:=GetDB()
     ret, err := db.Exec("delete from "+table+" where "+key+"=?", v)
     if err != nil {
         return -1, err
@@ -209,7 +214,6 @@ func DeleteById(db *sql.DB, table string, key string, v interface{}) (affectedRo
 `
 
 var DataSource string = `
-package service
 
 import (
     "database/sql"
