@@ -11,7 +11,7 @@ import (
 
 var db *sql.DB
 var once sync.Once
-var connStr string = "{{.ConnStr}}?parseTime=true&loc=UTC"
+var connStr string = "{{.ConnStr}}?parseTime=true&loc=Local"
 
 func GetDB() *sql.DB {
     once.Do(func() {

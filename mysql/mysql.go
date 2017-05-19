@@ -27,9 +27,9 @@ type MetaCol struct {
 	GoField string
 }
 type ConstVar struct {
-	StructName string
-	FieldName  string
-	Val        string
+	TypeName  string
+	FieldName string
+	Val       string
 }
 type SingleType struct {
 	TableName string
@@ -58,8 +58,9 @@ func GenCode(connStr, packageName string, tables []string, genMethods bool) {
 
 	data := prepareData(connStr, packageName, tables)
 
+	//fmt.Println(data)
 	genFile(tmpl.EntityTemplate, "entity.go", data)
-	genFile(tmpl.EntityTemplate, "datasource.go", data)
+	genFile(tmpl.DataSourceTemplage, "datasource.go", data)
 	if genMethods {
 		genFile(ExportTemplate, "export.go", data)
 	}
@@ -88,9 +89,14 @@ func prepareData(connString, packageName string, tables []string) TemplateContex
 		tables = GetTables()
 	}
 	context := TemplateContext{PackageName: packageName, ConnStr: connString, DriverName: driverName}
-	context.Packages = []string{"database/sql"}
+
 	for _, v := range tables {
 		context.Types = append(context.Types, GenTypeFromTable(v))
+	}
+
+	context.Packages = []string{"database/sql"}
+	for k, _ := range packages {
+		context.Packages = append(context.Packages, k)
 	}
 
 	return context
@@ -138,36 +144,7 @@ func GenTypeFromTable(tableName string) SingleType {
 	return SingleType{TableName: tableName, Camel: camel, Consts: constVars, Columns: table}
 }
 
-/*func genText(tableName string, cols []MetaCol) string {
-	var buffer bytes.Buffer
-	//buffer.WriteString("package entity\n\n")
-
-	buffer.WriteString("type " + camel + " struct {")
-	constVar := ""
-	metaSingleton := ""
-	for i, _ := range cols {
-		constVar += ifEnum(cols[i].Type, camel, cols[i].GoField)
-		metaSingleton += fmt.Sprintf("var %s%s ColumnMata = ColumnMata{ Field:\"%s\",Type:\"%s\",Null:\"%s\",Key:\"%s\",Default:\"%s\",Extra:\"%s\",GoType:\"%s\",GoField:\"%s\"}\n",
-			tableName, cols[i].GoField, cols[i].Field, cols[i].Type, cols[i].Null, cols[i].Key, cols[i].Default.String, cols[i].Extra, cols[i].GoType, cols[i].GoField)
-		buffer.WriteString(cols[i].String())
-	}
-	buffer.WriteString("\n}\n")
-	buffer.WriteString(constVar)
-	buffer.WriteString(metaSingleton)
-	buffer.WriteString(fmt.Sprintf("func (%v *%v) RowMap()(tableName string, colMap map[string]Column) {\n", tableName, camel))
-	buffer.WriteString("    colMap = map[string]Column{\n")
-	for i, v := range cols {
-		if i != 0 {
-			buffer.WriteString(",\n")
-		}
-		buffer.WriteString(fmt.Sprintf("\"%s\": Column{Meta : &%s%s, V : &%s.%s}", v.Field, tableName, v.GoField, tableName, v.GoField))
-	}
-	buffer.WriteString("    }\n")
-	buffer.WriteString("    return \"" + tableName + "\",colMap\n")
-	buffer.WriteString("    }\n\n\n")
-
-	return buffer.String()
-}*/
+var packages map[string]int = make(map[string]int)
 
 func mapFromSqlType(sqlType string, nullAble string) string {
 	ifNull := func(currentType string) string {
@@ -182,6 +159,7 @@ func mapFromSqlType(sqlType string, nullAble string) string {
 	} else if strings.Contains(sqlType, "char") || strings.Contains(sqlType, "text") {
 		return "string"
 	} else if strings.Contains(sqlType, "date") || strings.Contains(sqlType, "timestamp") {
+		packages["time"] = 1
 		return "time.Time"
 	} else if strings.Contains(sqlType, "float") || strings.Contains(sqlType, "double") {
 		return ifNull("float64")
@@ -198,7 +176,7 @@ func ifEnum(vars []ConstVar, sqlType, typeName, fieldName string) []ConstVar {
 		t := strings.Split(tmp, "','")
 		for i := 0; i < len(t); i++ {
 			des := strings.Replace(t[i], "-", "_", -1) //变量命名不可以有中划线, 会被认为是减号
-			vars = append(vars, ConstVar{StructName: typeName, FieldName: fieldName, Val: des})
+			vars = append(vars, ConstVar{TypeName: typeName, FieldName: fieldName, Val: des})
 		}
 		//fmt.Println(ret)
 	}
